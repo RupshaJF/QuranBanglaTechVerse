@@ -9,12 +9,14 @@ on:
 permissions:
   contents: write
 
+
 env:
   APP_NAME: Quran Bangla
   APP_ID: com.techverse.quranbangla
-  # সাইটের লাইভ লিংক: অ্যাপ এটাই খুলবে (API, আপডেট ঠিক থাকবে)
-  # ফাইল APK-র ভেতরে ঢোকাতে চাইলে লিংক মুছে লেখো: LIVE_URL: ''
+  APP_VERSION: '1.0.0'
+  APP_VERSION_CODE: '1'
   LIVE_URL: https://quranbangla.vercel.app
+
 
 jobs:
   apk:
@@ -94,11 +96,41 @@ jobs:
             find android/app/src/main/res -path '*mipmap-*' -name 'ic_launcher*.xml' -delete
           fi
 
+      
+      - name: Set Android app version
+        working-directory: /tmp/app
+        run: |
+          node <<'JS'
+          const fs = require('fs');
+          const file = 'android/app/build.gradle';
+          const fileKts = 'android/app/build.gradle.kts';
+          const target = fs.existsSync(file) ? file : fileKts;
+          if (!fs.existsSync(target)) {
+            throw new Error('Android app Gradle file not found');
+          }
+
+          let s = fs.readFileSync(target, 'utf8');
+          const versionName = process.env.APP_VERSION;
+          const versionCode = process.env.APP_VERSION_CODE;
+
+          if (target.endsWith('.gradle.kts')) {
+            s = s.replace(/versionCode\s+\d+/, `versionCode = ${versionCode}`);
+            s = s.replace(/versionName\s+["'][^"']*["']/, `versionName = "${versionName}"`);
+          } else {
+            s = s.replace(/versionCode\s+\d+/, `versionCode ${versionCode}`);
+            s = s.replace(/versionName\s+["'][^"']*["']/, `versionName "${versionName}"`);
+          }
+
+          fs.writeFileSync(target, s);
+          console.log(`App version: ${versionName} (${versionCode})`);
+          JS
+
       - name: Build APK
         working-directory: /tmp/app/android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
+
 
       - name: Name the APK
         run: |
