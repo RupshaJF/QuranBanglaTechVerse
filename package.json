@@ -4,6 +4,9 @@
   "private": true,
   "description": "Vercel serverless functions (api/) for কুরআন বাংলা — এই ফাইলটা root এ থাকলেই Vercel deploy করার সময় নিচের প্যাকেজগুলো নিজে থেকে install করে নেবে।",
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
     "firebase-admin": "^12.6.0"
   },
   "allowScripts": {
