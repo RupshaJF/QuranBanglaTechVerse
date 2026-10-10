@@ -1,0 +1,121 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths: ['.github/workflows/build-apk.yml']
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: Quran Bangla
+  APP_ID: com.techverse.quranbangla
+  # সাইটের লাইভ লিংক: অ্যাপ এটাই খুলবে (API, আপডেট ঠিক থাকবে)
+  # ফাইল APK-র ভেতরে ঢোকাতে চাইলে লিংক মুছে লেখো: LIVE_URL: ''
+  LIVE_URL: https://quranbangla.vercel.app
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('.github/workflows/build-apk.yml') }}
+
+      - name: Android project
+        run: |
+          WEB=.
+          for d in dist build public www; do
+            if [ -f "$d/index.html" ]; then WEB=$d; break; fi
+          done
+          export WEB
+          if [ -z "$LIVE_URL" ] && [ ! -f "$WEB/index.html" ]; then
+            echo "::error::index.html পাওয়া যায়নি"; exit 1
+          fi
+          echo "Web folder: $WEB"
+          mkdir -p /tmp/app/www && cd /tmp/app
+          if [ -n "$LIVE_URL" ]; then
+            echo '<!doctype html><meta charset="utf-8"><title>Loading</title>' > www/index.html
+          else
+            rsync -a --exclude=/.git --exclude=/.github "$GITHUB_WORKSPACE/$WEB"/ www/
+          fi
+          npm init -y > /dev/null
+          npm install @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capawesome/capacitor-android-edge-to-edge-support@8
+          node - <<'JS'
+          const fs = require("fs"), path = require("path"), e = process.env;
+          const web = path.join(e.GITHUB_WORKSPACE, e.WEB);
+          const cfg = {
+            appId: e.APP_ID,
+            appName: e.APP_NAME,
+            webDir: "www",
+            plugins: { SystemBars: { insetsHandling: "disable" } }
+          };
+          if (e.LIVE_URL) cfg.server = { url: e.LIVE_URL };
+          try {
+            const mf = ["manifest.json", "manifest.webmanifest", "site.webmanifest"]
+              .map(f => path.join(web, f)).find(f => fs.existsSync(f));
+            const m = JSON.parse(fs.readFileSync(mf, "utf8"));
+            if (/^#[0-9a-f]{6}$/i.test(m.theme_color)) {
+              const n = parseInt(m.theme_color.slice(1), 16);
+              const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+              cfg.plugins.EdgeToEdge = { backgroundColor: m.theme_color };
+              cfg.plugins.SystemBars.style = lum < 0.5 ? "DARK" : "LIGHT";
+            }
+            const size = i => parseInt(i.sizes) || 0;
+            const icon = (m.icons || []).filter(i => /\.png/i.test(i.src))
+              .sort((a, b) => size(b) - size(a))[0];
+            const rel = icon.src.split("?")[0];
+            fs.copyFileSync(
+              rel.startsWith("/") ? path.join(web, rel) : path.join(path.dirname(mf), rel),
+              "icon.png"
+            );
+          } catch (err) {
+            console.log("manifest/আইকন পাওয়া যায়নি, ডিফল্ট থাকবে:", err.message);
+          }
+          fs.writeFileSync("capacitor.config.json", JSON.stringify(cfg, null, 2));
+          JS
+          npx cap add android
+          if [ -f icon.png ]; then
+            find android/app/src/main/res -path '*mipmap-*' -name 'ic_launcher*.png' -exec cp icon.png {} \;
+            find android/app/src/main/res -path '*mipmap-*' -name 'ic_launcher*.xml' -delete
+          fi
+
+      - name: Build APK
+        working-directory: /tmp/app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Name the APK
+        run: |
+          APK="${APP_NAME// /}-${{ github.run_number }}.apk"
+          cp /tmp/app/android/app/build/outputs/apk/debug/app-debug.apk "$APK"
+          echo "APK=$APK" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: ${{ env.APK }}
+
+      - name: Publish to Releases
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" "$APK" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$APP_NAME #${{ github.run_number }}" --notes "Debug APK"
