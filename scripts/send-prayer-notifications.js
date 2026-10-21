@@ -67,7 +67,16 @@ console.log(`  ${p}: raw=${raw} now=${now} diff=${diff}`);
                 title: `${LABELS_BN[p]} এর সময় হয়েছে`,
                 body: 'নামাজের জন্য প্রস্তুত হোন।'
               },
-              data: { prayer: p },
+              // screen / category: read by the Android app (app/js/notifications.js) - a tap opens the prayer screen
+              // and the message is filed under "prayer" in the notification inbox
+              data: { prayer: p, screen: 'prayer', category: 'prayer' },
+              // Android app: the "prayer" notification channel (created by the app), delivered immediately, and a newer
+              // reminder of the same prayer replaces the old one. A reminder older than an hour is no longer useful.
+              android: {
+                priority: 'high',
+                ttl: 60 * 60 * 1000,
+                notification: { channelId: 'prayer', tag: 'prayer-' + p }
+              },
               webpush: {
                 notification: { icon: '/icons/icon-192.png' },
                 fcmOptions: { link: '/' }
@@ -75,7 +84,7 @@ console.log(`  ${p}: raw=${raw} now=${now} diff=${diff}`);
             });
             console.log(`Sent ${p} notification to ${doc.id}`);
           } catch (err) {
-            if (err.code === 'messaging/registration-token-not-registered') {
+            if (err.code === 'messaging/registration-token-not-registered' || err.code === 'messaging/invalid-registration-token') {
               await doc.ref.delete();
               console.log(`Removed stale subscription ${doc.id}`);
               removed = true;
