@@ -15,7 +15,7 @@ env:
   APP_ID: com.techverse.quranbangla
   APP_VERSION: '1.0.03'
   APP_VERSION_CODE: '3'
-  LIVE_URL: https://quranbangla.vercel.app
+  LIVE_URL: https://quranbangla.vercel.app/?qa_preview=1 
 
 
 jobs:
