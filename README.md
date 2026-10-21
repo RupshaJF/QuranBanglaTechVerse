@@ -133,6 +133,18 @@ npx serve .
 ### ৫. প্রোডাকশনে ডিপ্লয়
 পুরো `quran-main/` ফোল্ডার যেকোনো স্ট্যাটিক হোস্টিং-এ (Firebase Hosting, Netlify, Vercel, নিজের সার্ভার) আপলোড করলেই হবে। HTTPS আবশ্যক।
 
+## Android অ্যাপ (APK / AAB)
+
+ওয়েবসাইট আগের মতোই থাকে। GitHub Actions-এ বানানো Android অ্যাপ একই লাইভ সাইট লোড করে, কিন্তু অ্যাপের ভেতরে চললে `js/platform.js` তা শনাক্ত করে `app/` ফোল্ডারের **আলাদা অ্যাপ-UI** চালু করে (নিচে ৫-ট্যাব বটম নেভিগেশন, নিজস্ব রিডার, বটম শিট ইত্যাদি)। ব্যাকএন্ড (Firebase, Quran API, অডিও) একই; সাধারণ ব্রাউজারে `app/`-এর কোনো ফাইল লোড হয় না।
+
+- বিল্ড, secrets, Firebase, keystore, Google Play চেকলিস্ট: [`docs/ANDROID_BUILD_BN.md`](docs/ANDROID_BUILD_BN.md)
+- আর্কিটেকচার ও ফাইল ম্যাপ: [`docs/ANDROID_APP.md`](docs/ANDROID_APP.md)
+- পরীক্ষার ফলাফল ও সীমাবদ্ধতা: [`docs/TEST_REPORT.md`](docs/TEST_REPORT.md)
+- অ্যাপ-সংক্রান্ত সর্বজনীন সেটিং (সাপোর্ট ইমেইল, ডেভেলপারের নাম): `app-config.js`
+- নীতি-পাতা: `privacy.html`, `terms.html`, `account-deletion.html`
+
+ওয়েবসাইট বা `app/`-এর কোনো ফাইল বদলালে `js/data.js`-এর `SW_VERSION` বাড়াতে ভুলবেন না।
+
 ## Service Worker ক্যাশিং স্ট্র্যাটেজি (`sw.js`)
 
 | কনটেন্ট | স্ট্র্যাটেজি | কারণ |
@@ -144,9 +156,10 @@ npx serve .
 
 `sw.js`, `js/data.js` `importScripts()` দিয়ে লোড করে — তাই `data.js`-এ কখনো `window`/`document` রেফারেন্স রাখা যাবে না, শুধু প্লেইন কনস্ট্যান্ট ও pure ফাংশন।
 
-পেজ থেকে সার্ভিস ওয়ার্কারকে মেসেজ পাঠিয়ে দুটি কাজ করানো যায়:
+পেজ থেকে সার্ভিস ওয়ার্কারকে মেসেজ পাঠিয়ে তিনটি কাজ করানো যায়:
 - `SKIP_WAITING` — নতুন ভার্সন সাথে সাথে অ্যাক্টিভেট করা
 - `CACHE_AUDIO` (সাথে `urls` অ্যারে) — পুরো সূরার অডিও একসাথে prefetch/অফলাইন ডাউনলোড করা
+- `CACHE_ASSETS` (সাথে `urls` অ্যারে, শুধু same-origin) — Android অ্যাপের নিজস্ব UI ফাইল অফলাইনের জন্য ক্যাশ করা
 
 ## localStorage-ভিত্তিক ডেটা (অ্যাকাউন্ট ছাড়াই কাজ করে)
 

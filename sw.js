@@ -98,7 +98,27 @@ self.addEventListener('message', (event) => {
   if (data.type === 'CACHE_AUDIO' && Array.isArray(data.urls)) {
     event.waitUntil(cacheAudioBatch(data.urls, data.requestId));
   }
+  // The Android app UI (./app/...) asks for its own files to be cached once it has started, so the app opens
+  // offline from the next launch on. Same-origin files only.
+  if (data.type === 'CACHE_ASSETS' && Array.isArray(data.urls)) {
+    event.waitUntil(cacheShellAssets(data.urls));
+  }
 });
+
+async function cacheShellAssets(urls) {
+  try {
+    const cache = await caches.open(SHELL_CACHE_NAME);
+    for (const u of urls.slice(0, 80)) {
+      try {
+        const abs = new URL(String(u), self.location.href);
+        if (abs.origin !== self.location.origin) continue;
+        if (await cache.match(abs.href)) continue;
+        const res = await fetch(abs.href, { cache: 'reload' });
+        if (res && res.ok) await cache.put(abs.href, res.clone());
+      } catch (e) { /* one unreachable file never blocks the rest */ }
+    }
+  } catch (e) { /* best effort */ }
+}
 
 async function cacheAudioBatch(urls, requestId) {
   const cache = await caches.open(AUDIO_CACHE_NAME);
