@@ -52,7 +52,7 @@ const THEMES = [
 
 // Bump the version suffix any time app-shell files change so the service
 // worker picks up a fresh copy instead of serving a stale cached version.
-const SW_VERSION = 'v1.02.58';
+const SW_VERSION = 'v1.03.0';
 const SHELL_CACHE_NAME = `qr-shell-${SW_VERSION}`;
 const API_CACHE_NAME = `qr-api-${SW_VERSION}`;
 const AUDIO_CACHE_NAME = `qr-audio-${SW_VERSION}`;
@@ -103,6 +103,7 @@ const APP_SHELL_CORE = [
   './css/ai-tafsir.css',
   './css/ai-tafsir-diagram.css',
   './js/data.js',
+  './js/platform.js',
   './js/i18n/bn.js',
   './js/storage.js',
   './js/smart-storage.js',
@@ -123,6 +124,9 @@ const APP_SHELL_CORE = [
 ];
 
 // Cached lazily on first real use instead of at install — see note above.
+// (The Android app's own UI files under ./app/ are NOT listed here: a normal browser never needs them.
+// In the app, js/platform.js loads them and app/js/boot.js asks this worker to cache them once the app has
+// started, through the CACHE_ASSETS message handled in sw.js.)
 const APP_SHELL_DEFERRED = [
   './js/surah-info.js',
   './js/surah-benefits.js',
@@ -160,7 +164,14 @@ const APP_SHELL_DEFERRED = [
   './js/auto-offline.js',
   './js/theme-builder.js',
   './js/hadith.js',
-  './js/donation-banner.js'
+  './js/donation-banner.js',
+  // public pages (also opened from the Android app's About screen) + their shared contact config
+  './privacy.html',
+  './terms.html',
+  './account-deletion.html',
+  './css/legal.css',
+  './js/legal.js',
+  './app-config.js'
 ];
 
 // sw.js installs APP_SHELL_CORE only. Kept as one combined list too, in case

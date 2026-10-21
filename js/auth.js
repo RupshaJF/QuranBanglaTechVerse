@@ -1205,6 +1205,40 @@ async function performAccountDeletion(){
   }
 }
 
+// Firestore does NOT remove the sub-collections of a document when the document itself is deleted. Everything the
+// account owns below users/{uid} (login sessions with their device / network records, trusted devices, saved
+// highlights) and the owner's own status posts (with their view / reaction records) is therefore removed here,
+// while the security rules still recognise the signed-in owner. Best effort and never throws: whatever cannot be
+// removed here must not block the deletion of the account itself.
+async function deleteOwnAccountData(uid){
+  if(!uid || typeof fbDb === 'undefined' || !fbDb) return;
+  // Batches stay small on purpose: some of these rules look up other documents (the parent post, the admin list)
+  // and Firestore caps those lookups per batched write.
+  async function wipe(query, maxBatch, maxRounds){
+    for(let round = 0; round < maxRounds; round++){
+      const snap = await query.limit(maxBatch).get();
+      if(snap.empty) return;
+      const batch = fbDb.batch();
+      snap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      if(snap.size < maxBatch) return;
+    }
+  }
+  const userRef = fbDb.collection('users').doc(uid);
+  for(const name of ['sessions', 'trustedDevices', 'highlights']){
+    try{ await wipe(userRef.collection(name), 8, 60); }
+    catch(e){ console.warn('account data cleanup skipped:', name, e); }
+  }
+  try{
+    const mine = await fbDb.collection('statuses').where('uid', '==', uid).get();
+    for(const s of mine.docs){
+      try{ await wipe(s.ref.collection('views'), 8, 60); }catch(e){}
+      try{ await wipe(s.ref.collection('reactions'), 8, 60); }catch(e){}
+      try{ await s.ref.delete(); }catch(e){ console.warn('status cleanup skipped:', e); }
+    }
+  }catch(e){ console.warn('status cleanup skipped:', e); }
+}
+
 // Deletes the Firestore profile doc, then the Firebase Auth account itself.
 // The Firestore delete gets one retry — once the Auth account is gone,
 // the security rules that allow a user to delete their own doc no longer
@@ -1215,6 +1249,8 @@ async function performAccountDeletion(){
 // Errors from either step (e.g. auth/requires-recent-login) propagate to
 // the caller so it can reauthenticate and retry.
 async function deleteAccountEverywhere(fbUser){
+  try{ if(typeof stopSessionHeartbeat === 'function') stopSessionHeartbeat(); }catch(e){}
+  await deleteOwnAccountData(fbUser.uid);
   try{
     await fbDb.collection('users').doc(fbUser.uid).delete();
   }catch(e){
