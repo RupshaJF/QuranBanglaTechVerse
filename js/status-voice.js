@@ -488,7 +488,7 @@ function renderMusicSourcePicker(slide){
   if(current){
     document.getElementById('statusMusicRemoveBtn').onclick = () => {
       pushUndoSnapshot();
-      slide.musicData = null; slide.musicDuration = null; slide.musicPeaks = null; slide.musicName = null;
+      slide.musicData = null; slide.musicDuration = null; slide.musicPeaks = null; slide.musicName = null; slide.musicTrackId = null;
       closeStatusAudioSheet();
       renderComposerStage();
       saveComposerDraft();
@@ -570,6 +570,9 @@ function statusMusicLibRowHtml(t, idx){
 function attachLibTrackToSlide(slide, t){
   pushUndoSnapshot();
   slide.musicData = t.dataUrl; slide.musicDuration = t.duration; slide.musicPeaks = t.peaks; slide.musicName = t.name;
+  // স্টোরি মডারেশন: অ্যাডমিন-নির্বাচিত 'সংগ্রহ'-এর ট্র্যাক হলে সার্ভার আইডি দিয়ে মিলিয়ে নেয় (বাইট-ফর-বাইট);
+  // নিজের আপলোড/রেকর্ড করা অডিওতে আইডি নেই, তাই সেটা অ্যাডমিন রিভিউয়ে যায়।
+  slide.musicTrackId = (t && typeof t.id === 'string' && t.id.indexOf('shared:') === 0) ? t.id : null;
   closeStatusAudioSheet();
   renderComposerStage();
   saveComposerDraft();
@@ -764,6 +767,7 @@ function renderMusicTrimUI(audioBuffer, fileName){
       const musicName = (fileName || 'অডিও').replace(/\.[a-zA-Z0-9]+$/, '').slice(0, 60);
       pushUndoSnapshot();
       slide.musicData = dataUrl;
+      slide.musicTrackId = null;
       slide.musicDuration = Math.round(maxSec*1000);
       slide.musicPeaks = peaks;
       slide.musicName = musicName;
@@ -875,7 +879,7 @@ function renderAudioSheetPreview(dataUrl, durationMs, peaks){
       slide.mode = 'voice';
       slide.voiceData = dataUrl; slide.voiceDuration = durationMs; slide.voicePeaks = peaks;
     } else {
-      slide.musicData = dataUrl; slide.musicDuration = durationMs; slide.musicPeaks = peaks;
+      slide.musicData = dataUrl; slide.musicDuration = durationMs; slide.musicPeaks = peaks; slide.musicTrackId = null;
       const ordinal = statusMusicLibLoad().length + 1;
       slide.musicName = 'রেকর্ড করা অডিও ' + (typeof toBn === 'function' ? toBn(ordinal) : ordinal);
       statusMusicLibAdd({ name: slide.musicName, dataUrl, duration: durationMs, peaks });
@@ -925,7 +929,7 @@ function renderComposerMusicChip(stage, slide){
   chip.querySelector('#statusCompMusicChipX').onclick = (e) => {
     e.stopPropagation();
     pushUndoSnapshot();
-    slide.musicData = null; slide.musicDuration = null; slide.musicPeaks = null; slide.musicName = null;
+    slide.musicData = null; slide.musicDuration = null; slide.musicPeaks = null; slide.musicName = null; slide.musicTrackId = null;
     renderComposerStage();
     saveComposerDraft();
   };

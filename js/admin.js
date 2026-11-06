@@ -291,6 +291,8 @@ const AdminPanel = (() => {
   }
   #apOverlay .ap-tab i{font-size:13px;}
   #apOverlay .ap-tab.active{color:var(--gold,#b8863b);border-bottom-color:var(--gold,#b8863b);}
+  #apOverlay .ap-tab-badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#C4584B;color:#fff;font-size:10.5px;font-weight:700;line-height:18px;text-align:center;}
+  #apOverlay .ap-tab-badge[hidden]{display:none;}
 
   /* music: file picker + track rows (waveform/trim classes are reused as-is
      from status-extra.css — .status-trim-*, .status-sheet-btn, .status-audio-*
@@ -521,6 +523,7 @@ const AdminPanel = (() => {
         <button type="button" class="ap-tab active" id="apTabExam" data-tab="exam"><i class="fa-solid fa-pen-to-square"></i> পরীক্ষা</button>
         <button type="button" class="ap-tab" id="apTabMusic" data-tab="music"><i class="fa-solid fa-record-vinyl"></i> মিউজিক</button>
         <button type="button" class="ap-tab" id="apTabErrors" data-tab="errors"><i class="fa-solid fa-heart-pulse"></i> মনিটরিং</button>
+        <button type="button" class="ap-tab" id="apTabStories" data-tab="stories" style="display:none;"><i class="fa-solid fa-shield-halved"></i> স্টোরি মডারেশন <span class="ap-tab-badge" id="apStoriesBadge" hidden></span></button>
       </div>
 
       <!-- main body -->
@@ -599,6 +602,8 @@ const AdminPanel = (() => {
             <div id="apErrList"><div class="ap-empty"><i class="fa-solid fa-spinner fa-spin"></i>লোড হচ্ছে...</div></div>
           </div>
         </div>
+
+        <div id="apPanelStories" style="display:none;flex-direction:column;gap:16px;"></div>
       </div>
 
       <div class="ap-toast" id="apToast"></div>
@@ -629,6 +634,7 @@ const AdminPanel = (() => {
     _overlay.querySelector('#apTabExam').onclick = () => switchTab('exam');
     _overlay.querySelector('#apTabMusic').onclick = () => switchTab('music');
     _overlay.querySelector('#apTabErrors').onclick = () => switchTab('errors');
+    _overlay.querySelector('#apTabStories').onclick = () => switchTab('stories');
 
     _overlay.querySelector('#apErrFilterToggle').onchange = (e) => {
       _errFilterUnresolved = e.target.checked;
@@ -647,9 +653,23 @@ const AdminPanel = (() => {
     _overlay.querySelector('#apTabExam').classList.toggle('active', tab === 'exam');
     _overlay.querySelector('#apTabMusic').classList.toggle('active', tab === 'music');
     _overlay.querySelector('#apTabErrors').classList.toggle('active', tab === 'errors');
+    _overlay.querySelector('#apTabStories').classList.toggle('active', tab === 'stories');
     _overlay.querySelector('#apPanelExam').style.display   = tab === 'exam'   ? 'flex' : 'none';
     _overlay.querySelector('#apPanelMusic').style.display  = tab === 'music'  ? 'flex' : 'none';
     _overlay.querySelector('#apPanelErrors').style.display = tab === 'errors' ? 'flex' : 'none';
+    _overlay.querySelector('#apPanelStories').style.display = tab === 'stories' ? 'flex' : 'none';
+    // স্টোরি মডারেশন ট্যাব: প্রতিবার খোলার সময় সার্ভার থেকে টাটকা ডেটা আনে (js/admin-moderation.js)
+    if (tab === 'stories' && window.AdminModeration && !window.AdminModeration.isApp) {
+      window.AdminModeration.mount(_overlay.querySelector('#apPanelStories'), moderationContext());
+    }
+  }
+
+  /* ── story moderation tab: website only, data comes from /api/story-admin (server re-verifies admin on every call) ── */
+  function moderationContext() {
+    return {
+      getIdToken: () => (_auth && _auth.currentUser ? _auth.currentUser.getIdToken() : Promise.resolve(null)),
+      toast: (msg, ok) => toast(msg, ok !== false),
+    };
   }
 
   /* ── add exam ── */
@@ -1211,6 +1231,11 @@ const AdminPanel = (() => {
     startListener();
     startMusicListener();
     startErrorListener();
+
+    if (window.AdminModeration && !window.AdminModeration.isApp) {
+      _overlay.querySelector('#apTabStories').style.display = 'flex';
+      window.AdminModeration.refreshBadge(moderationContext());
+    }
   }
 
   /* ══ PUBLIC ══ */
@@ -1234,6 +1259,7 @@ const AdminPanel = (() => {
     _overlay.querySelector('#apTabs').style.display = 'none';
     _overlay.querySelector('#apBody').style.display = 'none';
     _overlay.querySelector('#apLogout').style.display = 'none';
+    _overlay.querySelector('#apTabStories').style.display = 'none';
     switchTab('exam');
 
     _overlay.style.display = 'flex';
@@ -1249,6 +1275,7 @@ const AdminPanel = (() => {
     if (_unsub) { _unsub(); _unsub = null; }
     if (_unsubMusic) { _unsubMusic(); _unsubMusic = null; }
     if (_unsubErrors) { _unsubErrors(); _unsubErrors = null; }
+    if (window.AdminModeration && window.AdminModeration.unmount) window.AdminModeration.unmount();
     const previewEl = _overlay.querySelector('#apMusicPreviewAudio');
     if (previewEl) { try{ previewEl.pause(); }catch(e){} }
     _user = null;

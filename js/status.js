@@ -157,6 +157,10 @@ function unmarkStatusReactedLocally(id){
 function renderStatusRow(){
   const wrap = document.getElementById('statusRow');
   if(!wrap) return;
+  // স্টোরি মডারেশন: অ্যাডমিন-রিভিউয়ের অপেক্ষায় থাকা স্টোরির সিদ্ধান্ত এলে (প্রতি সেশনে একবার) ইউজারকে জানায়।
+  if(state.user && window.StoryModeration && typeof window.StoryModeration.checkWatch === 'function'){
+    window.StoryModeration.checkWatch({ onApproved: () => { statusRowFetchedAt = 0; renderStatusRow(); } });
+  }
 
   if(!state.user){
     wrap.innerHTML = `
@@ -319,7 +323,7 @@ function makeBlankSlide(){
     // Background music riding along on a text/image slide (WhatsApp-style,
     // ≤ STATUS_MUSIC_MAX_MS) — independent of mode, so a text OR image
     // slide can carry it
-    musicData: null, musicDuration: null, musicPeaks: null, musicName: null
+    musicData: null, musicDuration: null, musicPeaks: null, musicName: null, musicTrackId: null
   };
 }
 function activeSlide(){ return statusComposerState.slides[statusComposerState.activeIndex]; }
@@ -406,6 +410,7 @@ function openStatusComposer(mode){
       if(s.musicDuration === undefined) s.musicDuration = null;
       if(s.musicPeaks === undefined) s.musicPeaks = null;
       if(s.musicName === undefined) s.musicName = null;
+      if(s.musicTrackId === undefined) s.musicTrackId = null;
     });
     statusComposerState = { slides: draft.slides, activeIndex: clamp(draft.activeIndex || 0, 0, draft.slides.length - 1), sending: false };
     showToast('খসড়া পুনরুদ্ধার করা হয়েছে');
@@ -528,6 +533,7 @@ function renderComposerStage(){
   renderComposerBottomPanel();
   renderComposerCounter();
   renderComposerChrome();
+  if(window.StoryModeration && typeof window.StoryModeration.renderSlideBanner === 'function') window.StoryModeration.renderSlideBanner();
 }
 
 function renderComposerCounter(){
@@ -1281,7 +1287,8 @@ function saveComposerDraft(){
       imageRawDataUrl:s.imageRawDataUrl, filterId:s.filterId, frameAspect:s.frameAspect, crop:s.crop,
       textOverlays: (s.textOverlays || []).map(o => ({ ...o })),
       voiceData:s.voiceData, voiceDuration:s.voiceDuration, voicePeaks:s.voicePeaks,
-      musicData:s.musicData, musicDuration:s.musicDuration, musicPeaks:s.musicPeaks, musicName:s.musicName
+      musicData:s.musicData, musicDuration:s.musicDuration, musicPeaks:s.musicPeaks, musicName:s.musicName, musicTrackId:s.musicTrackId,
+      _modReq:s._modReq || null
     }));
     const hasContent = slides.some(s => (s.textValue && s.textValue.trim()) || s.imageRawDataUrl || s.voiceData || s.musicData);
     if(!hasContent){ clearComposerDraft(); return; }
@@ -1300,71 +1307,126 @@ function clearComposerDraft(){
 }
 
 // ---------- send (bakes every image slide, uploads all slides in order) ----------
+// ------------------------------------------------------------------------------------------------
+// স্টোরি মডারেশন: এখান থেকে আর কখনোই সরাসরি Firestore-এ স্টোরি লেখা হয় না (firestore.rules-এ `statuses`
+// create বন্ধ)। প্রতিটা স্লাইড POST /api/story-submit-এ যায়; সার্ভার ভ্যালিডেশন + AI মডারেশন করে, আর শুধু
+// APPROVED স্টোরি সার্ভারই প্রকাশ করে। ক্লায়েন্ট শুধু ফলাফল দেখায় — js/story-moderation.js, api/story-submit.js।
+// ------------------------------------------------------------------------------------------------
+// ক্লায়েন্ট শুধু কনটেন্ট পাঠায়; uid/name/avatar/সময়/কাউন্টার সার্ভার নিজে ঠিক করে।
+async function buildStoryPayload(s){
+  let payload;
+  if(s.mode === 'image'){
+    const imageData = await renderSlideToImageDataUrl(s);
+    payload = { type:'image', imageData };
+    if(s.musicData) Object.assign(payload, { audioData:s.musicData, audioDuration:s.musicDuration, audioPeaks:s.musicPeaks || [], audioName:s.musicName || 'অডিও', musicTrackId:s.musicTrackId || undefined });
+  } else if(s.mode === 'voice'){
+    payload = {
+      type:'voice', bg: s.bg || STATUS_BG_SWATCHES[0],
+      audioData: s.voiceData, audioDuration: s.voiceDuration, audioPeaks: s.voicePeaks || []
+    };
+  } else {
+    payload = {
+      type:'text', text: (s.textValue || '').trim().slice(0, 700),
+      bg: s.bg || STATUS_BG_SWATCHES[0], font: STATUS_FONTS[s.fontIndex || 0].id,
+      align: s.align || 'center', size: Math.round(s.size || 26),
+      textColor: s.textColor || '#ffffff', highlight: !!s.highlight
+    };
+    if(s.musicData) Object.assign(payload, { audioData:s.musicData, audioDuration:s.musicDuration, audioPeaks:s.musicPeaks || [], audioName:s.musicName || 'অডিও', musicTrackId:s.musicTrackId || undefined });
+  }
+  return payload;
+}
+
 async function submitStatus(){
   if(!state.user || statusComposerState.sending) return;
+  const SM = window.StoryModeration;
+  if(!SM || SM.disabled){ showToast('স্টোরি শুধু ওয়েবসাইট থেকে পোস্ট করা যায়'); return; }
   finalizeActiveOverlayIfAny();
-  const slides = statusComposerState.slides;
+  const slides = statusComposerState.slides.slice();
   for(const s of slides){
     if(s.mode === 'image'){ if(!s.imageRawDataUrl){ showToast('একটি ছবি বাছুন'); return; } }
     else if(s.mode === 'voice'){ if(!s.voiceData){ showToast('ভয়েস রেকর্ড করুন'); return; } }
     else if(!(s.textValue || '').trim() && !s.musicData){ showToast('কিছু লিখুন'); return; }
   }
 
-  statusComposerState.sending = true;
+  statusComposerState.sending = true; // ডুপ্লিকেট সাবমিশন ঠেকায়
   const sendBtn = document.getElementById('statusCompSend');
   if(sendBtn){ sendBtn.disabled = true; sendBtn.classList.add('busy'); sendBtn.innerHTML = '<i class="fa-solid fa-circle-notch"></i>'; }
   const counterEl = document.getElementById('statusCompCounter');
-  const baseNow = Date.now();
 
+  const results = []; // { index, slide, out }
   try{
     for(let i = 0; i < slides.length; i++){
-      if(counterEl) counterEl.textContent = slides.length > 1 ? `${toBn(i + 1)}/${toBn(slides.length)} পাঠানো হচ্ছে...` : 'পাঠানো হচ্ছে...';
       const s = slides[i];
-      let payload;
-      if(s.mode === 'image'){
-        const imageData = await renderSlideToImageDataUrl(s);
-        payload = { type:'image', imageData };
-        if(s.musicData) Object.assign(payload, { audioData:s.musicData, audioDuration:s.musicDuration, audioPeaks:s.musicPeaks || [], audioName:s.musicName || 'অডিও' });
-      } else if(s.mode === 'voice'){
-        payload = {
-          type:'voice', bg: s.bg || STATUS_BG_SWATCHES[0],
-          audioData: s.voiceData, audioDuration: s.voiceDuration, audioPeaks: s.voicePeaks || []
-        };
-      } else {
-        payload = {
-          type:'text', text: (s.textValue || '').trim().slice(0, 700),
-          bg: s.bg || STATUS_BG_SWATCHES[0], font: STATUS_FONTS[s.fontIndex || 0].id,
-          align: s.align || 'center', size: Math.round(s.size || 26),
-          textColor: s.textColor || '#ffffff', highlight: !!s.highlight
-        };
-        if(s.musicData) Object.assign(payload, { audioData:s.musicData, audioDuration:s.musicDuration, audioPeaks:s.musicPeaks || [], audioName:s.musicName || 'অডিও' });
+      // "আপনার স্টোরি যাচাই করা হচ্ছে..." → "AI মডারেশন চলছে..."
+      const setPhase = (phase) => {
+        const t = SM.phaseText(phase, i, slides.length);
+        SM.progress.show(t);
+        if(counterEl) counterEl.textContent = t;
+      };
+      setPhase('check');
+      let out;
+      try{
+        const payload = await buildStoryPayload(s);
+        out = await SM.submit(payload, SM.requestIdFor(s), { onPhase:setPhase, regenerate:() => SM.resetRequestId(s) });
+      } catch(err){
+        console.warn('story slide could not be prepared:', err);
+        out = { status:'error', title:'স্লাইড প্রস্তুত করা যায়নি', message:'এই স্লাইডটি প্রস্তুত করা যায়নি। ছবিটি আবার বেছে চেষ্টা করুন।', guideline:null, retryable:false, fatal:false };
       }
-      const createdAt = baseNow + i * 50;
-      const doc = Object.assign({
-        uid: state.user.uid,
-        name: state.user.name || 'ব্যবহারকারী',
-        avatarColor: state.user.avatarColor || '',
-        avatarIcon: state.user.avatarIcon || '',
-        createdAt, expiresAt: createdAt + STATUS_TTL_MS,
-        viewCount: 0, reactCount: 0
-      }, payload);
-      await fbDb.collection('statuses').add(doc);
+      results.push({ index:i, slide:s, out });
+      // নেটওয়ার্ক/সেশন/রেট-লিমিট সমস্যা, বা AI বন্ধ থাকলে বাকি স্লাইড পাঠিয়ে লাভ নেই — সেগুলো কম্পোজারে অক্ষত থাকে।
+      if(out.fatal || (out.status === 'pending' && out.retryable)) break;
     }
-    showToast(slides.length > 1 ? 'সব স্ট্যাটাস আপলোড হয়েছে' : 'স্ট্যাটাস আপলোড হয়েছে');
+  } finally {
+    SM.progress.hide();
+  }
+
+  // কোন স্লাইড কম্পোজার থেকে সরবে: যেগুলো প্রকাশিত হয়েছে বা অ্যাডমিন-রিভিউয়ের জন্য নিরাপদে জমা হয়েছে।
+  // অনুমোদিত হয়নি / পাঠানো যায়নি এমন স্লাইড থেকে যায়, যাতে সম্পাদনা করে আবার জমা দেওয়া যায়।
+  const done = new Set();
+  for(const r of results){
+    SM.setSlideNote(r.slide, r.out);
+    if(r.out.status === 'approved' || r.out.status === 'review_required') done.add(r.slide);
+  }
+  const uid = state.user.uid;
+  SM.watchAdd(uid, results.filter(r => r.out.submissionId && (r.out.status === 'review_required' || (r.out.status === 'pending' && !r.out.retryable))).map(r => r.out.submissionId));
+  results.forEach(r => { if(r.out.status === 'approved' && r.out.submissionId) SM.watchRemove(uid, r.out.submissionId); });
+
+  statusComposerState.slides = statusComposerState.slides.filter(s => !done.has(s));
+  statusComposerState.sending = false;
+  const remaining = statusComposerState.slides;
+
+  if(!remaining.length){
     clearComposerDraft();
-    statusComposerState.sending = false;
     const ov = document.getElementById('statusComposerOverlay');
     if(ov) ov.classList.remove('open');
     document.body.style.overflow = '';
-    statusRowFetchedAt = 0;
-    renderStatusRow();
-  } catch(err){
-    console.warn('status upload failed:', err);
-    showToast('স্ট্যাটাস আপলোড করা যায়নি, আবার চেষ্টা করুন');
-    statusComposerState.sending = false;
-    if(sendBtn){ sendBtn.disabled = false; sendBtn.classList.remove('busy'); sendBtn.innerHTML = '<i class="fa-solid fa-check"></i>'; }
+  } else {
+    const noteIdx = remaining.findIndex(s => s._modNote);
+    statusComposerState.activeIndex = noteIdx >= 0 ? noteIdx : clamp(statusComposerState.activeIndex || 0, 0, remaining.length - 1);
+    saveComposerDraft();
+    renderComposerStage();
+    const btn = document.getElementById('statusCompSend');
+    if(btn){ btn.disabled = false; btn.classList.remove('busy'); btn.innerHTML = '<i class="fa-solid fa-check"></i>'; }
     renderComposerCounter();
   }
+  if(results.some(r => r.out.status === 'approved')){ statusRowFetchedAt = 0; renderStatusRow(); }
+
+  const allApproved = results.length === slides.length && results.every(r => r.out.status === 'approved');
+  if(allApproved){
+    // সব প্রকাশিত — ব্লকিং শীট ছাড়াই শুধু নিশ্চিতকরণ
+    showToast(slides.length > 1 ? 'আপনার সব স্টোরি অনুমোদিত হয়েছে এবং প্রকাশিত হয়েছে।' : results[0].out.message);
+    return;
+  }
+  SM.showResults(results.map(r => ({ index:r.index, out:r.out })), {
+    onEdit: (index) => {
+      const r = results.find(x => x.index === index);
+      const at = r ? statusComposerState.slides.indexOf(r.slide) : -1;
+      if(at >= 0){ statusComposerState.activeIndex = at; renderComposerStage(); }
+      setTimeout(() => { const f = document.querySelector('#statusCompStage textarea, #statusCompStage [contenteditable="true"]'); if(f && f.focus) f.focus(); }, 60);
+    },
+    onRetry: () => { submitStatus(); },
+    onMine: () => { SM.openMine(); }
+  });
 }
 
 // ==================================================================

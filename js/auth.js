@@ -1237,6 +1237,19 @@ async function deleteOwnAccountData(uid){
       try{ await s.ref.delete(); }catch(e){ console.warn('status cleanup skipped:', e); }
     }
   }catch(e){ console.warn('status cleanup skipped:', e); }
+  // Story moderation records (pending/rejected submissions, counters, audit log) live in server-only collections the
+  // browser cannot touch — ask the server to purge them while the user's token is still valid. Best effort.
+  try{
+    const cu = (typeof fbAuth !== 'undefined' && fbAuth) ? fbAuth.currentUser : null;
+    if(cu && cu.uid === uid){
+      const token = await cu.getIdToken();
+      await fetch('/api/story-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ action: 'purge' })
+      });
+    }
+  }catch(e){ console.warn('story moderation cleanup skipped:', e); }
 }
 
 // Deletes the Firestore profile doc, then the Firebase Auth account itself.
