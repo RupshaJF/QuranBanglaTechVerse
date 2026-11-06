@@ -225,55 +225,28 @@ service cloud.firestore {
     // (js/status-voice.js — ≤১৫ সেকেন্ড), ২৪ ঘণ্টা মেয়াদ (expiresAt দিয়ে
     // client-side ফিল্টার হয়, তাই মেয়াদ শেষ হলে আলাদা করে ডিলিট না করেও
     // সেটা আর কারো ফিডে দেখায় না), "কারা দেখেছে" ও "লাভ রিয়েক্ট"
-    // সাব-কালেকশন। দেখা বা পোস্ট করা — দুটোর জন্যই সাইন-ইন করা বাধ্যতামূলক
-    // (allow read/write সবই request.auth != null চায়)।
-    //
-    // create/update স্কিমা ইচ্ছাকৃতভাবে backward-compatible: viewCount ও
-    // reactCount সহ নতুন সব ফিল্ড optional, তাই ডিপ্লয়ের সময় একটা পুরোনো
-    // cached ক্লায়েন্ট (নতুন ফিল্ডগুলো না পাঠিয়ে) স্ট্যাটাস পোস্ট/রিয়েক্ট
-    // করতে গেলেও ভেঙে পড়বে না।
+    // সাব-কালেকশন। দেখার জন্য সাইন-ইন বাধ্যতামূলক। পোস্ট করা এখন শুধু
+    // সার্ভার (POST /api/story-submit → AI মডারেশন → Admin SDK) দিয়ে হয় —
+    // নিচের `allow create: if false` দেখুন। update (ভিউ/রিয়েক্ট কাউন্টার)
+    // স্কিমা আগের মতোই backward-compatible: reactCount optional, তাই
+    // পুরোনো ডকুমেন্টেও রিয়েক্ট চলে।
     // ------------------------------------------------------------------
     match /statuses/{statusId} {
       allow read: if request.auth != null;
 
-      allow create: if request.auth != null
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.keys().hasOnly(['uid','name','avatarColor','avatarIcon','type','text','bgIndex','bg','font','align','size','textColor','highlight','imageData','audioData','audioDuration','audioPeaks','audioName','createdAt','expiresAt','viewCount','reactCount'])
-        && request.resource.data.keys().hasAll(['uid','name','avatarColor','avatarIcon','type','createdAt','expiresAt'])
-        && request.resource.data.name is string && request.resource.data.name.size() <= 120
-        && request.resource.data.avatarColor is string
-        && request.resource.data.avatarIcon is string
-        && request.resource.data.type in ['text','image','voice']
-        && (!('text' in request.resource.data) || (request.resource.data.text is string && request.resource.data.text.size() <= 700))
-        && (!('bgIndex' in request.resource.data) || request.resource.data.bgIndex is int)
-        && (!('bg' in request.resource.data) || request.resource.data.bg in [
-              '#2E6F5E','#7A2E44','#3D4F8A','#6B3F8A','#8A4A2E','#2E6B8A','#5A6B2E','#3A3A46',
-              'linear-gradient(135deg,#2E6F5E,#123B2C)','linear-gradient(135deg,#7A2E44,#3A0F1E)',
-              'linear-gradient(135deg,#3D4F8A,#141B3D)','linear-gradient(135deg,#6B3F8A,#24123D)',
-              'linear-gradient(135deg,#8A4A2E,#3A2110)','linear-gradient(135deg,#2E6B8A,#0F2A38)',
-              'linear-gradient(135deg,#5A6B2E,#22280F)','linear-gradient(135deg,#3A3A46,#16161C)'
-            ])
-        && (!('font' in request.resource.data) || request.resource.data.font is string)
-        && (!('align' in request.resource.data) || request.resource.data.align in ['left','center','right'])
-        && (!('size' in request.resource.data) || (request.resource.data.size is number && request.resource.data.size >= 14 && request.resource.data.size <= 56))
-        && (!('textColor' in request.resource.data) || (request.resource.data.textColor is string && request.resource.data.textColor.matches('^#[0-9A-Fa-f]{6}$')))
-        && (!('highlight' in request.resource.data) || request.resource.data.highlight is bool)
-        && (!('imageData' in request.resource.data) || (request.resource.data.imageData is string && request.resource.data.imageData.size() <= 900000))
-        // audioData: ভয়েস-স্ট্যাটাসে (type:'voice') এটাই মূল কনটেন্ট, আর
-        // text/image স্ট্যাটাসে থাকলে সেটা পেছনে বাজতে থাকা ব্যাকগ্রাউন্ড
-        // মিউজিক (js/status-voice.js — কম্পোজারেই সর্বোচ্চ ৬০ সেকেন্ড
-        // (ভয়েস) / ১৫ সেকেন্ড (মিউজিক)-এ কমপ্রেস করে পাঠানো হয়, তাই ৭৫০KB
-        // ছাদ যথেষ্ট মার্জিন সহ)
-        && (!('audioData' in request.resource.data) || (request.resource.data.audioData is string && request.resource.data.audioData.size() <= 750000))
-        && (!('audioDuration' in request.resource.data) || (request.resource.data.audioDuration is number && request.resource.data.audioDuration > 0 && request.resource.data.audioDuration <= 60000))
-        && (!('audioPeaks' in request.resource.data) || (request.resource.data.audioPeaks is list && request.resource.data.audioPeaks.size() <= 60))
-        && (!('audioName' in request.resource.data) || (request.resource.data.audioName is string && request.resource.data.audioName.size() <= 120))
-        && request.resource.data.createdAt is number
-        && request.resource.data.expiresAt is number
-        && request.resource.data.expiresAt > request.resource.data.createdAt
-        && (!('viewCount' in request.resource.data) || request.resource.data.viewCount == 0)
-        && (!('reactCount' in request.resource.data) || request.resource.data.reactCount == 0);
+      // ── স্টোরি মডারেশন (AI + অ্যাডমিন, সম্পূর্ণ সার্ভার-সাইড) ─────────────────
+      // ব্রাউজার থেকে আর কেউ সরাসরি `statuses`-এ ডকুমেন্ট বানাতে পারবে না।
+      // ওয়েবসাইটের প্রতিটা স্টোরি POST /api/story-submit-এ যায়; সেখানে
+      // ভ্যালিডেশন → Gemini মডারেশন → (প্রয়োজনে) অ্যাডমিন রিভিউ হয়, আর শুধু
+      // APPROVED স্টোরি Firebase Admin SDK (সার্ভিস অ্যাকাউন্ট — যেটা এই
+      // রুলসের আওতার বাইরে) দিয়ে এখানে প্রকাশ হয়। ফলে কেউ নিজের স্টোরিকে
+      // approved/published বলে মার্ক করতে বা AI চেক এড়িয়ে সরাসরি এই কালেকশনে
+      // লিখতে পারে না। (আগের create-রুলে যে ফিল্ড-তালিকা ছিল, সেটা এখন
+      // api/_story-policy.js → sanitizeStory()/buildPublishedStatus()-এ আছে।)
+      allow create: if false;
 
+      // (মডারেশন ফিল্ড — moderationStatus, moderatedAt, publishedAt, submissionId … —
+      // এই রুলে কখনোই বদলানো যায় না: affectedKeys শুধু viewCount/reactCount।)
       // মালিক নিজে যেকোনো ফিল্ড বদলাতে পারবে না — শুধু viewCount ঠিক এক
       // করে বাড়ানো (যেকোনো সাইন-ইন করা ভিউয়ার নিজের ভিউ রেকর্ড করার সময়)
       // এবং reactCount ঠিক এক করে বাড়ানো/কমানো (রিয়েক্ট/আন-রিয়েক্ট টগল করার
@@ -320,6 +293,23 @@ service cloud.firestore {
               || get(/databases/$(database)/documents/statuses/$(statusId)).data.uid == request.auth.uid);
       }
     }
+
+    // ── স্টোরি মডারেশনের ব্যাক-এন্ড (শুধু সার্ভার) ────────────────────────────
+    // এই কালেকশনগুলো যেকোনো ব্রাউজার ক্লায়েন্টের জন্য বন্ধ — অ্যাডমিন
+    // অ্যাকাউন্টের জন্যও। অ্যাডমিন প্যানেল এগুলো শুধু POST /api/story-admin
+    // দিয়ে পড়ে/বদলায়; সেখানে প্রতিটা কলে Firebase টোকেন + admins/{uid}
+    // যাচাই হয়। তাই মডারেশন রেকর্ড/ইতিহাস ক্লায়েন্ট থেকে পড়া, বদলানো বা মুছে
+    // ফেলা অসম্ভব (Admin SDK রুল এড়িয়ে চলে, ক্লায়েন্ট পারে না)।
+    //   story_submissions  — প্রতিটা সাবমিশন + AI সিদ্ধান্ত + কারণ
+    //   story_moderation_log — append-only অডিট ট্রেইল
+    //   story_user_state   — রেট-লিমিট, কুলডাউন, বারবার লঙ্ঘনের হিসাব
+    //   story_ai_cache     — একই কনটেন্টে বারবার AI কল এড়াতে ক্যাশ
+    //   story_stats        — ড্যাশবোর্ডের দৈনিক কাউন্টার
+    match /story_submissions/{id} { allow read, write: if false; }
+    match /story_moderation_log/{id} { allow read, write: if false; }
+    match /story_user_state/{uid} { allow read, write: if false; }
+    match /story_ai_cache/{id} { allow read, write: if false; }
+    match /story_stats/{id} { allow read, write: if false; }
 
     match /siteConfig/{doc} {
       allow read: if true;
